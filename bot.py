@@ -527,9 +527,9 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🕐 Sana: {row[1]}\n"
             f"📌 Holat: {row[12]}\n"
         )
-        if row[13]:
+        if len(row) > 13 and row[13]:
             text += f"💬 Izoh: {row[13]}\n"
-        if row[14]:
+        if len(row) > 14 and row[14]:
             text += f"🗓 Intervyu: {row[14]}\n"
         kb = [
             [
