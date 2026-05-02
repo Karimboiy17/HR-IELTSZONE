@@ -536,10 +536,11 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("✅ Qabul", callback_data=f"acc|{num}|{row[8]}"),
                 InlineKeyboardButton("❌ Rad", callback_data=f"rej|{num}|{row[8]}")
             ],
-            [InlineKeyboardButton("🗓 Intervyu belgilash", callback_data=f"interview|{num}|{row[8]}|{row[2]}")],
+            [InlineKeyboardButton("🗓 Intervyu belgilash", callback_data=f"interview|{num}|{row[8]}")],
             [InlineKeyboardButton("📩 Xabar yuborish", callback_data=f"sendmsg|{num}|{row[8]}")],
             [InlineKeyboardButton("🗂 Arxivlash", callback_data=f"archive|{num}")],
         ]
+        ctx.user_data["view_name"] = row[2]
         await q.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
     elif (d.startswith("acc|") or d.startswith("rej|")) and uid in ADMIN_IDS:
@@ -561,7 +562,8 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif d.startswith("interview|") and uid in ADMIN_IDS:
         parts = d.split("|")
-        row_num, applicant_id, name = parts[1], int(parts[2]), parts[3]
+        row_num, applicant_id = parts[1], int(parts[2])
+        name = ctx.user_data.get("view_name", "Candidate")
         ctx.user_data["step"] = "setting_interview"
         ctx.user_data["interview_row"] = row_num
         ctx.user_data["interview_uid"] = applicant_id
@@ -669,7 +671,7 @@ async def on_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("✅ Qabul", callback_data=f"acc|{row_num}|{user.id}"),
                 InlineKeyboardButton("❌ Rad", callback_data=f"rej|{row_num}|{user.id}")
             ],[
-                InlineKeyboardButton("🗓 Intervyu", callback_data=f"interview|{row_num}|{user.id}|{app_data['name']}"),
+                InlineKeyboardButton("🗓 Intervyu", callback_data=f"interview|{row_num}|{user.id}"),
                 InlineKeyboardButton("📩 Xabar", callback_data=f"sendmsg|{row_num}|{user.id}")
             ]])
             if file_type == "Rasm":
