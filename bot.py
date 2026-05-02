@@ -189,7 +189,7 @@ def kb_admin():
         ["➕ Bo'lim qo'shish", "🗑 Bo'lim o'chirish"],
         ["📋 Bo'limlar", "💼 Vakansiyalar"],
         ["📊 Statistika", "📂 Arizalar"],
-        ["🗂 Arxiv"],
+        ["📅 Bugungi suhbatlar", "🗂 Arxiv"],
     ], resize_keyboard=True)
 
 def kb_user():
@@ -290,6 +290,21 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 label = f"{status_icon} #{r[0]} {r[2][:10]} | {r[5][:10]}"
                 kb_rows.append([InlineKeyboardButton(label, callback_data=f"va|{r[0]}")])
             await update.message.reply_text("📂 *Arizalar:*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb_rows))
+            return
+
+        if text == "📅 Bugungi suhbatlar":
+            rows = get_all_resumes()
+            today = datetime.now().strftime("%d-%m") 
+            today2 = datetime.now().strftime("%Y-%m-%d")
+            today_interviews = [r for r in rows if len(r) > 14 and r[14] and (today in r[14] or today2 in r[14])]
+            if not today_interviews:
+                await update.message.reply_text("📅 Bugun suhbatlar yo'q.", reply_markup=kb_admin())
+            else:
+                count = len(today_interviews)
+                t = f"📅 *Bugungi suhbatlar ({count} ta):*\n\n"
+                for r in today_interviews:
+                    t += f"🕐 {r[14]}\n👤 {r[2]}\n📱 {r[3]}\n💼 {r[5]}\n📌 {r[12]}\n\n"
+                await update.message.reply_text(t, parse_mode="Markdown", reply_markup=kb_admin())
             return
 
         if text == "🗂 Arxiv":
@@ -531,15 +546,30 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text += f"💬 Izoh: {row[13]}\n"
         if len(row) > 14 and row[14]:
             text += f"🗓 Intervyu: {row[14]}\n"
-        kb = [
-            [
-                InlineKeyboardButton("✅ Qabul", callback_data=f"acc|{num}|{row[8]}"),
-                InlineKeyboardButton("❌ Rad", callback_data=f"rej|{num}|{row[8]}")
-            ],
-            [InlineKeyboardButton("🗓 Intervyu belgilash", callback_data=f"interview|{num}|{row[8]}")],
-            [InlineKeyboardButton("📩 Xabar yuborish", callback_data=f"sendmsg|{num}|{row[8]}")],
-            [InlineKeyboardButton("🗂 Arxivlash", callback_data=f"archive|{num}")],
-        ]
+        has_interview = len(row) > 14 and row[14].strip()
+        if has_interview:
+            kb = [
+                [
+                    InlineKeyboardButton("✅ O'tdi", callback_data=f"acc|{num}|{row[8]}"),
+                    InlineKeyboardButton("❌ O'tmadi", callback_data=f"rej|{num}|{row[8]}")
+                ],
+                [
+                    InlineKeyboardButton("🔄 Vaqtni o'zgartirish", callback_data=f"interview|{num}|{row[8]}"),
+                    InlineKeyboardButton("🚫 Bekor qilish", callback_data=f"cancel_interview|{num}|{row[8]}")
+                ],
+                [InlineKeyboardButton("📩 Xabar yuborish", callback_data=f"sendmsg|{num}|{row[8]}")],
+                [InlineKeyboardButton("🗂 Arxivlash", callback_data=f"archive|{num}")],
+            ]
+        else:
+            kb = [
+                [
+                    InlineKeyboardButton("✅ Qabul", callback_data=f"acc|{num}|{row[8]}"),
+                    InlineKeyboardButton("❌ Rad", callback_data=f"rej|{num}|{row[8]}")
+                ],
+                [InlineKeyboardButton("🗓 Intervyu belgilash", callback_data=f"interview|{num}|{row[8]}")],
+                [InlineKeyboardButton("📩 Xabar yuborish", callback_data=f"sendmsg|{num}|{row[8]}")],
+                [InlineKeyboardButton("🗂 Arxivlash", callback_data=f"archive|{num}")],
+            ]
         ctx.user_data["view_name"] = row[2]
         await q.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -586,6 +616,27 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         num = d.split("|")[1]
         archive_resume(num)
         await q.message.reply_text(f"🗂 Ariza #{num} arxivlandi.", reply_markup=kb_admin())
+
+    elif d.startswith("cancel_interview|") and uid in ADMIN_IDS:
+        parts = d.split("|")
+        num, applicant_id = parts[1], int(parts[2])
+        # Clear interview from sheet
+        ws = get_sheet("Resumes")
+        for i, r in enumerate(ws.get_all_values()):
+            if r and str(r[0]) == str(num):
+                ws.update_cell(i+1, 15, "")
+                ws.update_cell(i+1, 13, "Kutilmoqda")
+                name = r[2]
+                break
+        try:
+            await ctx.bot.send_message(
+                chat_id=applicant_id,
+                text="📅 *Intervyu bekor qilindi*\n\nHurmatli nomzod, sizning intervyungiz bekor qilindi.\nTez orada yangi vaqt belgilanadi. Uzr so'raymiz! 🙏",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Cancel interview notify error: {e}")
+        await q.message.reply_text(f"✅ Ariza #{num} intervyusi bekor qilindi.", reply_markup=kb_admin())
 
     # --- User ---
     elif d.startswith("user_dept|"):
@@ -727,6 +778,7 @@ async def do_reply(ctx, update, comment):
 # ========== SCHEDULER — reminder ==========
 
 async def check_pending_reminders(bot):
+    """3 kundan ortiq javobsiz arizalar uchun eslatma"""
     try:
         rows = get_all_resumes()
         now = datetime.now()
@@ -752,6 +804,65 @@ async def check_pending_reminders(bot):
     except Exception as e:
         logger.error(f"Scheduler error: {e}")
 
+async def check_interview_reminders(bot):
+    """Intervyudan 30 daqiqa oldin eslatma"""
+    try:
+        rows = get_all_resumes()
+        now = datetime.now()
+        for r in rows:
+            if len(r) > 14 and r[14] and "Intervyu" in r[12]:
+                try:
+                    # Parse interview time - support formats: "15-may, soat 14:00" or "2026-05-15 14:00"
+                    interview_str = r[14].strip()
+                    interview_dt = None
+                    
+                    # Try standard format
+                    for fmt in ["%Y-%m-%d %H:%M", "%d.%m.%Y %H:%M"]:
+                        try:
+                            interview_dt = datetime.strptime(interview_str, fmt)
+                            break
+                        except:
+                            pass
+                    
+                    if interview_dt:
+                        diff_minutes = (interview_dt - now).total_seconds() / 60
+                        if 25 <= diff_minutes <= 35:  # 30 min window
+                            # Notify candidate
+                            try:
+                                await bot.send_message(
+                                    chat_id=int(r[8]),
+                                    text=(
+                                        f"⏰ *Eslatma!*\n\n"
+                                        f"Hurmatli {r[2]},\n"
+                                        f"Sizning intervyungiz *30 daqiqadan so'ng* boshlanadi!\n\n"
+                                        f"📅 Vaqt: *{r[14]}*\n\n"
+                                        f"O'z vaqtida keling! 🍀"
+                                    ),
+                                    parse_mode="Markdown"
+                                )
+                            except Exception as e:
+                                logger.error(f"Candidate reminder error: {e}")
+                            # Notify admins
+                            for admin_id in ADMIN_IDS:
+                                try:
+                                    await bot.send_message(
+                                        chat_id=admin_id,
+                                        text=(
+                                            f"⏰ *30 daqiqadan keyin intervyu!*\n\n"
+                                            f"👤 {r[2]}\n"
+                                            f"📱 {r[3]}\n"
+                                            f"💼 {r[5]}\n"
+                                            f"🕐 {r[14]}"
+                                        ),
+                                        parse_mode="Markdown"
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Admin reminder error: {e}")
+                except:
+                    pass
+    except Exception as e:
+        logger.error(f"Interview reminder error: {e}")
+
 # ========== MAIN ==========
 
 def main():
@@ -760,6 +871,7 @@ def main():
     # Scheduler
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_pending_reminders, "interval", hours=12, args=[app.bot])
+    scheduler.add_job(check_interview_reminders, "interval", minutes=5, args=[app.bot])
     scheduler.start()
 
     app.add_handler(CommandHandler("start", cmd_start))
