@@ -15,14 +15,13 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 ADMIN_IDS = [1054482233, 7375517762]
 
 WELCOME_TEXT = (
-    "🧭 *To'g'ri yo'lni tanlaydiganlar doim yuqori natija oladi!*\n\n"
-    "Bu kompas sizga tanishmi? Hoynahoy, bilasiz! Bu kompas faqat to'g'ri yo'lni ko'rsatadi "
-    "va rasmda ham buning isbotini ko'rish mumkin.\n\n"
-    "🎯 Bir maqsad ortidan yo'lga chiqqaningizda, sizni chalg'ituvchi narsalar ko'p bo'ladi. "
-    "Ammo siz to'g'ri yo'lni tanlasangiz, manzilga tezroq yetasiz.\n\n"
-    "🪝 Maqsadingizga erishishda sizga *IELTS ZONE* yordam beradi.\n\n"
-    "━━━━━━━━━━━━━━━━━━\n"
-    "❓ *Biz bilan bir maqsad yo'lidamisiz?*"
+    "👋 Assalomu alaykum!\n"
+    "IELTS Zone jamoasiga xush kelibsiz.\n"
+    "Bu bot orqali siz:\n"
+    "📌 Ishga ariza topshirishingiz\n"
+    "📌 Bo'sh ish o'rinlari bilan tanishishingiz\n"
+    "📌 Suhbat jarayoni haqida ma'lumot olishingiz mumkin\n"
+    "Davom etish uchun quyidagi bo'limlardan birini tanlang 👇"
 )
 
 # ========== GOOGLE SHEETS ==========
