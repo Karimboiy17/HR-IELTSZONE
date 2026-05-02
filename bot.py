@@ -2,382 +2,299 @@ import logging
 import os
 import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    filters, ContextTypes
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
-ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "1054482233,7375517762").split(",")]
+ADMIN_IDS = [1054482233, 7375517762]
 
-# ---- GOOGLE SHEETS ----
+IELTS_INFO = (
+    "🎓 *IELTS ZONE* haqida\n\n"
+    "IELTS Zone — O'zbekistondagi eng yirik IELTS tayyorlov markazlaridan biri.\n\n"
+    "📌 *Afzalliklarimiz:*\n"
+    "• Tajribali va sertifikatlangan o'qituvchilar\n"
+    "• Kichik guruhlar (max 8 kishi)\n"
+    "• O'rtacha natija: 7.0+\n\n"
+    "Biz bilan ishlash — karyerangizni rivojlantirish! 🚀"
+)
 
-def get_sheets_client():
-    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-    creds_dict = json.loads(creds_json)
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
+# ========== SHEETS ==========
+
+def sheets():
+    creds_dict = json.loads(os.environ.get("GOOGLE_CREDENTIALS"))
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     return gspread.authorize(creds)
 
-def get_or_create_sheet(name):
-    client = get_sheets_client()
-    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+def get_sheet(name):
+    sp = sheets().open_by_key(SPREADSHEET_ID)
     try:
-        return spreadsheet.worksheet(name)
-    except gspread.exceptions.WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=name, rows=1000, cols=20)
+        return sp.worksheet(name)
+    except:
+        return sp.add_worksheet(title=name, rows=1000, cols=20)
 
 def get_departments():
-    sheet = get_or_create_sheet("Departments")
-    data = sheet.get_all_values()
-    return [row[0] for row in data if row and row[0].strip()]
+    ws = get_sheet("Departments")
+    return [r[0] for r in ws.get_all_values() if r and r[0].strip()]
 
-def add_department(name):
-    sheet = get_or_create_sheet("Departments")
-    sheet.append_row([name])
+def add_dept(name):
+    get_sheet("Departments").append_row([name.strip()])
 
-def remove_department(name):
-    sheet = get_or_create_sheet("Departments")
-    data = sheet.get_all_values()
-    for i, row in enumerate(data):
-        if row and row[0] == name:
-            sheet.delete_rows(i + 1)
-            return True
-    return False
+def del_dept(name):
+    ws = get_sheet("Departments")
+    for i, r in enumerate(ws.get_all_values()):
+        if r and r[0] == name:
+            ws.delete_rows(i + 1)
+            return
 
-def save_resume(applicant_name, department, telegram_id, username, file_id, file_type):
-    sheet = get_or_create_sheet("Resumes")
-    data = sheet.get_all_values()
-    if not data or data == [[]]:
-        sheet.append_row(["#", "Sana", "Ism", "Bo'lim", "Telegram ID", "Username", "File ID", "File Type", "Holat", "Izoh"])
-    row_num = len(sheet.get_all_values())
-    sheet.append_row([
-        row_num,
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        applicant_name,
-        department,
-        str(telegram_id),
-        username or "—",
-        file_id,
-        file_type,
-        "Kutilmoqda",
-        ""
+def save_resume(name, dept, uid, username, file_id, ftype):
+    ws = get_sheet("Resumes")
+    rows = ws.get_all_values()
+    if not rows or rows == [[]]:
+        ws.append_row(["#", "Sana", "Ism", "Bolim", "TG ID", "Username", "File ID", "Turi", "Holat", "Izoh"])
+    num = len(ws.get_all_values())
+    ws.append_row([num, datetime.now().strftime("%Y-%m-%d %H:%M"), name, dept, str(uid), username or "-", file_id, ftype, "Kutilmoqda", ""])
+    return num
+
+def update_status(num, status, comment):
+    ws = get_sheet("Resumes")
+    for i, r in enumerate(ws.get_all_values()):
+        if r and str(r[0]) == str(num):
+            ws.update_cell(i+1, 9, status)
+            ws.update_cell(i+1, 10, comment)
+            return
+
+# ========== KEYBOARDS ==========
+
+def kb_main():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("📝 Ariza topshirish", callback_data="apply")]])
+
+def kb_admin():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Bo'lim qo'shish", callback_data="a_add")],
+        [InlineKeyboardButton("🗑 Bo'lim o'chirish", callback_data="a_del")],
+        [InlineKeyboardButton("📋 Bo'limlar", callback_data="a_list")],
+        [InlineKeyboardButton("📊 Arizalar", callback_data="a_resumes")],
     ])
-    return row_num
 
-def update_resume_status(row_num, status, comment):
-    sheet = get_or_create_sheet("Resumes")
-    data = sheet.get_all_values()
-    for i, row in enumerate(data):
-        if row and str(row[0]) == str(row_num):
-            sheet.update_cell(i + 1, 9, status)
-            sheet.update_cell(i + 1, 10, comment)
-            return True
-    return False
+def kb_depts():
+    depts = get_departments()
+    kb = [[InlineKeyboardButton(d, callback_data=f"d|{d}")] for d in depts]
+    kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data="back")])
+    return InlineKeyboardMarkup(kb), depts
 
-# ---- STATE MANAGEMENT ----
-# user_data keys:
-# "step": current step
-# "department": selected department
-# "name": entered name
-# "reply_row": admin reply row num
-# "reply_user": admin reply user id
-# "reply_status": accept/reject
+def kb_back_admin():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Admin menu", callback_data="a_back")]])
 
-# ---- HANDLERS ----
+# ========== COMMAND /start ==========
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    context.user_data.clear()
-
-    if user_id in ADMIN_IDS:
-        await show_admin_menu(update, context)
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data.clear()
+    uid = update.effective_user.id
+    if uid in ADMIN_IDS:
+        await update.message.reply_text("👨‍💼 *Admin Panel*", reply_markup=kb_admin(), parse_mode="Markdown")
     else:
-        await show_main_menu(update, context)
+        await update.message.reply_text("👋 *IELTS Zone HR Botiga xush kelibsiz!*", reply_markup=kb_main(), parse_mode="Markdown")
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("📝 Ishga ariza topshirish", callback_data="apply")]]
-    text = "👋 *IELTS Zone HR Botiga xush kelibsiz!*\n\nBizga qo'shilishni xohlaysizmi?"
-    if update.message:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    else:
-        await update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+# ========== CALLBACK HANDLER ==========
 
-async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("➕ Bo'lim qo'shish", callback_data="admin_add")],
-        [InlineKeyboardButton("🗑 Bo'lim o'chirish", callback_data="admin_remove")],
-        [InlineKeyboardButton("📋 Bo'limlar ro'yxati", callback_data="admin_list")],
-        [InlineKeyboardButton("📊 Arizalar", callback_data="admin_resumes")],
-    ]
-    text = "👨‍💼 *Admin Panel*\n\nNimani qilmoqchisiz?"
-    if update.message:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    else:
-        await update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+    uid = q.from_user.id
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    user_id = update.effective_user.id
-
-    # ---- USER FLOW ----
-    if data == "apply":
-        IELTS_INFO = (
-            "🎓 *IELTS ZONE* haqida\n\n"
-            "IELTS Zone — O'zbekistondagi eng yirik IELTS tayyorlov markazlaridan biri.\n\n"
-            "📌 *Afzalliklarimiz:*\n"
-            "• Tajribali va sertifikatlangan o'qituvchilar\n"
-            "• Kichik guruhlar (max 8 kishi)\n"
-            "• Haqiqiy imtihon sharoitida mashqlar\n"
-            "• O'rtacha natija: 7.0+\n\n"
-            "Biz bilan ishlash — karyerangizni rivojlantirish! 🚀"
-        )
-        await query.message.reply_text(IELTS_INFO, parse_mode="Markdown")
-
-        departments = get_departments()
-        if not departments:
-            await query.message.reply_text("⚠️ Hozircha bo'sh ish o'rinlari yo'q.")
+    # --- USER ---
+    if d == "apply":
+        await q.message.reply_text(IELTS_INFO, parse_mode="Markdown")
+        kb, depts = kb_depts()
+        if not depts:
+            await q.message.reply_text("⚠️ Hozircha bo'sh o'rinlar yo'q.")
             return
+        await q.message.reply_text("📋 *Qaysi bo'lim uchun?*", reply_markup=kb, parse_mode="Markdown")
+        ctx.user_data["step"] = "dept"
 
-        keyboard = [[InlineKeyboardButton(dept, callback_data=f"dept_{dept}")] for dept in departments]
-        keyboard.append([InlineKeyboardButton("🔙 Orqaga", callback_data="back_main")])
-        await query.message.reply_text(
-            "📋 *Qaysi bo'lim uchun ariza topshirmoqchisiz?*",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        context.user_data["step"] = "select_dept"
+    elif d.startswith("d|"):
+        dept = d[2:]
+        ctx.user_data["dept"] = dept
+        ctx.user_data["step"] = "name"
+        await q.message.reply_text(f"✅ Bo'lim: *{dept}*\n\n👤 To'liq ismingizni yozing:", parse_mode="Markdown")
 
-    elif data.startswith("dept_") and context.user_data.get("step") == "select_dept":
-        dept = data[5:]
-        context.user_data["department"] = dept
-        context.user_data["step"] = "enter_name"
-        await query.message.reply_text(
-            f"✅ Bo'lim: *{dept}*\n\n👤 To'liq ismingizni yozing (Familiya Ism):",
-            parse_mode="Markdown"
-        )
+    elif d == "back":
+        ctx.user_data.clear()
+        await q.message.reply_text("👋 *IELTS Zone HR Botiga xush kelibsiz!*", reply_markup=kb_main(), parse_mode="Markdown")
 
-    elif data == "back_main":
-        context.user_data.clear()
-        await show_main_menu(update, context)
+    # --- ADMIN ---
+    elif d == "a_add" and uid in ADMIN_IDS:
+        ctx.user_data["step"] = "adding_dept"
+        await q.message.reply_text("✏️ Yangi bo'lim nomini yozing:", reply_markup=kb_back_admin())
 
-    # ---- ADMIN FLOW ----
-    elif data == "admin_add" and user_id in ADMIN_IDS:
-        context.user_data["step"] = "admin_adding_dept"
-        keyboard = [[InlineKeyboardButton("🔙 Bekor qilish", callback_data="admin_back")]]
-        await query.message.reply_text(
-            "✏️ Yangi bo'lim nomini yozing:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif data == "admin_remove" and user_id in ADMIN_IDS:
-        departments = get_departments()
-        if not departments:
-            await query.message.reply_text("❌ Hozircha bo'limlar yo'q.")
+    elif d == "a_del" and uid in ADMIN_IDS:
+        depts = get_departments()
+        if not depts:
+            await q.message.reply_text("❌ Bo'limlar yo'q.", reply_markup=kb_back_admin())
             return
-        keyboard = [[InlineKeyboardButton(f"🗑 {dept}", callback_data=f"del_{dept}")] for dept in departments]
-        keyboard.append([InlineKeyboardButton("🔙 Orqaga", callback_data="admin_back")])
-        await query.message.reply_text(
-            "Qaysi bo'limni o'chirmoqchisiz?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        kb = [[InlineKeyboardButton(f"🗑 {d}", callback_data=f"del|{d}")] for d in depts]
+        kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data="a_back")])
+        await q.message.reply_text("Qaysi bo'limni o'chirish?", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data.startswith("del_") and user_id in ADMIN_IDS:
-        dept = data[4:]
-        remove_department(dept)
-        await query.message.reply_text(f"✅ *{dept}* o'chirildi.", parse_mode="Markdown")
-        await show_admin_menu(update, context)
+    elif d.startswith("del|") and uid in ADMIN_IDS:
+        dept = d[4:]
+        del_dept(dept)
+        await q.message.reply_text(f"✅ *{dept}* o'chirildi.", parse_mode="Markdown", reply_markup=kb_back_admin())
 
-    elif data == "admin_list" and user_id in ADMIN_IDS:
-        departments = get_departments()
-        if not departments:
-            text = "📋 Bo'limlar ro'yxati bo'sh."
-        else:
-            text = "📋 *Bo'limlar:*\n\n" + "\n".join([f"• {d}" for d in departments])
-        keyboard = [[InlineKeyboardButton("🔙 Orqaga", callback_data="admin_back")]]
-        await query.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    elif d == "a_list" and uid in ADMIN_IDS:
+        depts = get_departments()
+        text = "📋 *Bo'limlar:*\n\n" + "\n".join(f"• {x}" for x in depts) if depts else "📋 Bo'limlar yo'q."
+        await q.message.reply_text(text, parse_mode="Markdown", reply_markup=kb_back_admin())
 
-    elif data == "admin_resumes" and user_id in ADMIN_IDS:
-        sheet = get_or_create_sheet("Resumes")
-        rows = sheet.get_all_values()
+    elif d == "a_resumes" and uid in ADMIN_IDS:
+        ws = get_sheet("Resumes")
+        rows = ws.get_all_values()
         if len(rows) <= 1:
-            await query.message.reply_text("📊 Hozircha arizalar yo'q.")
+            text = "📊 Hozircha arizalar yo'q."
         else:
             text = "📊 *Arizalar:*\n\n"
-            for row in rows[1:]:
-                if len(row) >= 9:
-                    text += f"#{row[0]} | {row[2]} | {row[3]} | {row[8]}\n"
-            await query.message.reply_text(text, parse_mode="Markdown")
-        keyboard = [[InlineKeyboardButton("🔙 Orqaga", callback_data="admin_back")]]
-        await query.message.reply_text(".", reply_markup=InlineKeyboardMarkup(keyboard))
+            for r in rows[1:]:
+                if len(r) >= 9:
+                    text += f"#{r[0]} | {r[2]} | {r[3]} | {r[8]}\n"
+        await q.message.reply_text(text, parse_mode="Markdown", reply_markup=kb_back_admin())
 
-    elif data == "admin_back" and user_id in ADMIN_IDS:
-        context.user_data.clear()
-        await show_admin_menu(update, context)
+    elif d == "a_back" and uid in ADMIN_IDS:
+        ctx.user_data.clear()
+        await q.message.reply_text("👨‍💼 *Admin Panel*", reply_markup=kb_admin(), parse_mode="Markdown")
 
-    elif (data.startswith("accept_") or data.startswith("reject_")) and user_id in ADMIN_IDS:
-        parts = data.split("_")
-        action = parts[0]
-        row_num = parts[1]
-        applicant_id = int(parts[2])
-        status = "Qabul qilindi ✅" if action == "accept" else "Rad etildi ❌"
-        context.user_data["step"] = "admin_replying"
-        context.user_data["reply_row"] = row_num
-        context.user_data["reply_user"] = applicant_id
-        context.user_data["reply_status"] = status
-        keyboard = [[InlineKeyboardButton("⏭ Izoхsiz yuborish", callback_data="skip_reply")]]
-        await query.message.reply_text(
-            f"📝 Ariza #{row_num} — *{status}*\n\nIzoh yozing yoki o'tkazib yuboring:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
+    elif (d.startswith("acc|") or d.startswith("rej|")) and uid in ADMIN_IDS:
+        parts = d.split("|")
+        action, row_num, applicant_id = parts[0], parts[1], int(parts[2])
+        status = "✅ Qabul qilindi" if action == "acc" else "❌ Rad etildi"
+        ctx.user_data["step"] = "replying"
+        ctx.user_data["r_row"] = row_num
+        ctx.user_data["r_uid"] = applicant_id
+        ctx.user_data["r_status"] = status
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Izoхsiz yuborish", callback_data="skip_reply")]])
+        await q.message.reply_text(f"Ariza #{row_num} — *{status}*\n\nIzoh yozing:", reply_markup=kb, parse_mode="Markdown")
 
-    elif data == "skip_reply" and user_id in ADMIN_IDS:
-        await send_reply_to_applicant(update, context, comment="")
+    elif d == "skip_reply" and uid in ADMIN_IDS:
+        await do_reply(ctx, update, "")
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    step = context.user_data.get("step")
-    text = update.message.text
+# ========== MESSAGE HANDLER ==========
 
-    # Admin: adding department
-    if step == "admin_adding_dept" and user_id in ADMIN_IDS:
-        name = text.strip()
-        if not name:
-            await update.message.reply_text("⚠️ Bo'lim nomi bo'sh bo'lmasligi kerak.")
+async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    step = ctx.user_data.get("step")
+    text = update.message.text.strip()
+
+    if step == "name":
+        if len(text) < 3:
+            await update.message.reply_text("⚠️ Kamida 3 harf kiriting.")
             return
-        add_department(name)
-        await update.message.reply_text(f"✅ *{name}* bo'limi qo'shildi!", parse_mode="Markdown")
-        context.user_data.clear()
-        await show_admin_menu(update, context)
-
-    # Admin: replying to applicant
-    elif step == "admin_replying" and user_id in ADMIN_IDS:
-        await send_reply_to_applicant(update, context, comment=text)
-
-    # User: entering name
-    elif step == "enter_name":
-        name = text.strip()
-        if len(name) < 3:
-            await update.message.reply_text("⚠️ Iltimos, to'liq ismingizni kiriting (kamida 3 harf).")
-            return
-        context.user_data["name"] = name
-        context.user_data["step"] = "upload_resume"
+        ctx.user_data["name"] = text
+        ctx.user_data["step"] = "resume"
         await update.message.reply_text(
-            f"👋 Salom, *{name}*!\n\n"
-            "📎 Rezyumengizni yuboring.\n"
-            "📄 Formatlar: *PDF* yoki *Word (.docx)*",
+            f"👋 Salom, *{text}*!\n\n📎 Rezyumeni yuboring (PDF yoki Word):",
             parse_mode="Markdown"
         )
+
+    elif step == "adding_dept" and uid in ADMIN_IDS:
+        if not text:
+            await update.message.reply_text("⚠️ Nom bo'sh bo'lmasin.")
+            return
+        add_dept(text)
+        await update.message.reply_text(f"✅ *{text}* qo'shildi!", parse_mode="Markdown")
+        ctx.user_data.clear()
+        await update.message.reply_text("👨‍💼 *Admin Panel*", reply_markup=kb_admin(), parse_mode="Markdown")
+
+    elif step == "replying" and uid in ADMIN_IDS:
+        await do_reply(ctx, update, text)
 
     else:
-        if user_id in ADMIN_IDS:
-            await show_admin_menu(update, context)
+        if uid in ADMIN_IDS:
+            await update.message.reply_text("👨‍💼 *Admin Panel*", reply_markup=kb_admin(), parse_mode="Markdown")
         else:
-            await show_main_menu(update, context)
+            await update.message.reply_text("👋 *IELTS Zone HR Botiga xush kelibsiz!*", reply_markup=kb_main(), parse_mode="Markdown")
 
-async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ========== DOCUMENT HANDLER ==========
+
+async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.user_data.get("step") != "resume":
+        await update.message.reply_text("Iltimos /start bosing.")
+        return
+
+    doc = update.message.document
+    fname = doc.file_name.lower()
+    if not (fname.endswith(".pdf") or fname.endswith(".docx") or fname.endswith(".doc")):
+        await update.message.reply_text("❌ Faqat PDF yoki Word (docx) yuboring.")
+        return
+
     user = update.effective_user
-    step = context.user_data.get("step")
-
-    if step != "upload_resume":
-        await update.message.reply_text("Iltimos avval /start bosing.")
-        return
-
-    document = update.message.document
-    file_name = document.file_name.lower()
-
-    if not (file_name.endswith(".pdf") or file_name.endswith(".docx") or file_name.endswith(".doc")):
-        await update.message.reply_text("❌ Faqat PDF yoki Word formatida yuboring.")
-        return
-
-    name = context.user_data["name"]
-    department = context.user_data["department"]
-    file_id = document.file_id
-    file_type = "PDF" if file_name.endswith(".pdf") else "Word"
-
-    row_num = save_resume(name, department, user.id, user.username, file_id, file_type)
+    name = ctx.user_data["name"]
+    dept = ctx.user_data["dept"]
+    ftype = "PDF" if fname.endswith(".pdf") else "Word"
+    row_num = save_resume(name, dept, user.id, user.username, doc.file_id, ftype)
 
     for admin_id in ADMIN_IDS:
         try:
             caption = (
-                f"📨 *Yangi ariza!*\n\n"
-                f"👤 Ism: {name}\n"
-                f"🏢 Bo'lim: {department}\n"
-                f"📱 Telegram: @{user.username or '—'}\n"
-                f"🆔 ID: `{user.id}`\n"
-                f"📄 Format: {file_type}\n"
-                f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-                f"Ariza #: `{row_num}`"
+                f"📨 *Yangi ariza #{row_num}*\n\n"
+                f"👤 {name}\n🏢 {dept}\n"
+                f"📱 @{user.username or '—'} | ID: `{user.id}`\n"
+                f"📄 {ftype} | 🕐 {datetime.now().strftime('%H:%M %d.%m.%Y')}"
             )
-            keyboard = [[
-                InlineKeyboardButton("✅ Qabul", callback_data=f"accept_{row_num}_{user.id}"),
-                InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_{row_num}_{user.id}")
-            ]]
-            await context.bot.send_document(
-                chat_id=admin_id,
-                document=file_id,
-                caption=caption,
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Qabul", callback_data=f"acc|{row_num}|{user.id}"),
+                InlineKeyboardButton("❌ Rad", callback_data=f"rej|{row_num}|{user.id}")
+            ]])
+            await ctx.bot.send_document(chat_id=admin_id, document=doc.file_id, caption=caption, parse_mode="Markdown", reply_markup=kb)
         except Exception as e:
-            logger.error(f"Admin {admin_id} ga yuborishda xato: {e}")
+            logger.error(f"Admin {admin_id}: {e}")
 
-    await update.message.reply_text(
-        "✅ *Rezyumengiz yuborildi!*\n\n"
-        "⏳ HR adminimiz ko'rib chiqib, tez orada bog'lanadi.\n"
-        "🙏 Rahmat!",
-        parse_mode="Markdown"
-    )
-    context.user_data.clear()
+    await update.message.reply_text("✅ *Rezyumengiz yuborildi!*\n\n⏳ Tez orada bog'lanamiz. Rahmat! 🙏", parse_mode="Markdown")
+    ctx.user_data.clear()
 
-async def send_reply_to_applicant(update: Update, context: ContextTypes.DEFAULT_TYPE, comment: str):
-    row_num = context.user_data.get("reply_row")
-    applicant_id = context.user_data.get("reply_user")
-    status = context.user_data.get("reply_status")
+# ========== REPLY HELPER ==========
 
-    update_resume_status(row_num, status, comment)
-
+async def do_reply(ctx, update, comment):
+    row_num = ctx.user_data.get("r_row")
+    applicant_id = ctx.user_data.get("r_uid")
+    status = ctx.user_data.get("r_status")
+    update_status(row_num, status, comment)
     try:
-        msg = f"📬 *Arizangiz bo'yicha yangilik!*\n\nHolat: *{status}*"
+        msg = f"📬 *Arizangiz natijasi*\n\nHolat: *{status}*"
         if comment:
-            msg += f"\n💬 Izoh: {comment}"
-        await context.bot.send_message(chat_id=applicant_id, text=msg, parse_mode="Markdown")
+            msg += f"\n💬 {comment}"
+        await ctx.bot.send_message(chat_id=applicant_id, text=msg, parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"Arizachiga xabar yuborishda xato: {e}")
+        logger.error(f"Applicant reply error: {e}")
 
+    reply_msg = f"✅ Yuborildi! Ariza #{row_num} yangilandi."
     if update.message:
-        await update.message.reply_text(f"✅ Javob yuborildi! Ariza #{row_num} yangilandi.")
+        await update.message.reply_text(reply_msg)
     else:
-        await update.callback_query.message.reply_text(f"✅ Javob yuborildi! Ariza #{row_num} yangilandi.")
+        await update.callback_query.message.reply_text(reply_msg)
 
-    context.user_data.clear()
-    await show_admin_menu(update, context)
+    ctx.user_data.clear()
+    if update.message:
+        await update.message.reply_text("👨‍💼 *Admin Panel*", reply_markup=kb_admin(), parse_mode="Markdown")
+    else:
+        await update.callback_query.message.reply_text("👨‍💼 *Admin Panel*", reply_markup=kb_admin(), parse_mode="Markdown")
+
+# ========== MAIN ==========
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    logger.info("Bot ishga tushdi...")
-    app.run_polling()
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(MessageHandler(filters.Document.ALL, on_document))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+    logger.info("✅ Bot started!")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
