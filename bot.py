@@ -287,10 +287,8 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             kb_rows = []
             for r in sorted_rows[:20]:
                 status_icon = "⏳" if r[12] == "Kutilmoqda" else ("✅" if "Qabul" in r[12] else ("🗓" if "Intervyu" in r[12] else "❌"))
-                kb_rows.append([InlineKeyboardButton(
-                    f"{status_icon} #{r[0]} {r[2]} | {r[5]}",
-                    callback_data=f"view_app|{r[0]}"
-                )])
+                label = f"{status_icon} #{r[0]} {r[2][:10]} | {r[5][:10]}"
+                kb_rows.append([InlineKeyboardButton(label, callback_data=f"va|{r[0]}")])
             await update.message.reply_text("📂 *Arizalar:*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb_rows))
             return
 
@@ -386,7 +384,8 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text("⚠️ Hozircha bo'sh ish o'rinlari yo'q.", reply_markup=ReplyKeyboardRemove())
                     return
                 kb = [[InlineKeyboardButton(d, callback_data=f"user_dept|{d}")] for d in depts]
-                await update.message.reply_text("🎉 Ajoyib! Qaysi bo'lim?", reply_markup=InlineKeyboardMarkup(kb))
+                await update.message.reply_text("🎉 Ajoyib! Qaysi bo'lim uchun ariza topshirmoqchisiz?", reply_markup=ReplyKeyboardRemove())
+                await update.message.reply_text("👇 Bo'limni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
                 ctx.user_data["step"] = "select_dept"
             else:
                 await update.message.reply_text("🙂 Qaror o'zgarsa, /start bosing. Omad! 👋", reply_markup=ReplyKeyboardRemove())
@@ -399,7 +398,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⚠️ Hozircha bo'sh ish o'rinlari yo'q.")
                 return
             kb = [[InlineKeyboardButton(d, callback_data=f"user_dept|{d}")] for d in depts]
-            await update.message.reply_text("📋 Qaysi bo'lim?", reply_markup=InlineKeyboardMarkup(kb))
+            await update.message.reply_text("👇 Bo'limni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
             ctx.user_data["step"] = "select_dept"
             return
 
@@ -508,7 +507,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         del_vacancy(dept, title)
         await q.message.reply_text(f"✅ *{title}* o'chirildi.", parse_mode="Markdown", reply_markup=kb_admin())
 
-    elif d.startswith("view_app|") and uid in ADMIN_IDS:
+    elif (d.startswith("view_app|") or d.startswith("va|")) and uid in ADMIN_IDS:
         num = d.split("|")[1]
         rows = get_all_resumes()
         row = next((r for r in rows if str(r[0]) == str(num)), None)
@@ -685,7 +684,7 @@ async def on_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "⏳ HR adminimiz ko'rib chiqib, tez orada siz bilan bog'lanadi.\n\n"
         "🙏 Vaqt ajratganingiz uchun rahmat!",
         parse_mode="Markdown",
-        reply_markup=kb_user()
+        reply_markup=ReplyKeyboardRemove()
     )
     ctx.user_data.clear()
 
